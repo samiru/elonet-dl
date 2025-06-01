@@ -49,7 +49,6 @@ def process_finna(soup):
         if not title_elem:
             title_elem = soup.find("title")
             if title_elem:
-                # Extract title from title tag (remove site name if present)
                 title = title_elem.text.split(" | ")[0].strip()
             else:
                 title = "finna_video"
@@ -57,8 +56,7 @@ def process_finna(soup):
             title = title_elem.text.strip()
         
         name = sanitize_filename(title) + ".mp4"
-        
-        # Look for different possible video source elements
+
         # Method 1: Look for video-js element
         video_elem = soup.find("video", class_="video-js")
         if video_elem and video_elem.has_attr("data-sources"):
@@ -66,7 +64,7 @@ def process_finna(soup):
             hls_sources = [s for s in sources if s.get('type') == 'application/x-mpegURL']
             if hls_sources:
                 return name, hls_sources[0]['src']
-        
+
         # Method 2: Look for video player div with data attribute
         player_div = soup.find("div", id=lambda x: x and x.startswith("video-player"))
         if player_div and player_div.has_attr("data-video-sources"):
@@ -74,8 +72,14 @@ def process_finna(soup):
             hls_sources = [s for s in sources if s.get('type') == 'application/x-mpegURL']
             if hls_sources:
                 return name, hls_sources[0]['src']
-        
-        # Method 3: Search for any script containing video sources
+
+        # Method 3: Look for <finna-video> tag with source attribute
+        finna_video = soup.find("finna-video", attrs={"source": True})
+        if finna_video:
+            video_url = finna_video["source"]
+            return name, video_url
+
+        # Method 4: Search for any script containing video sources
         scripts = soup.find_all("script")
         for script in scripts:
             if script.string and "videoSources" in script.string:
@@ -85,7 +89,7 @@ def process_finna(soup):
                     hls_sources = [s for s in sources if s.get('type') == 'application/x-mpegURL']
                     if hls_sources:
                         return name, hls_sources[0]['src']
-        
+
         raise ValueError("Could not find video sources in the page")
     except Exception as e:
         raise ValueError(f"Error processing finna URL: {str(e)}")
