@@ -107,26 +107,37 @@ def determine_site_type(url):
 def download_video(url, name):
     """Download and process the HLS video."""
     try:
-        # Load playlist for another playlist...
+        # If the URL is not a direct m3u8, try to extract it from the embed page
+        if not url.endswith('.m3u8'):
+            resp = requests.get(url)
+            if resp.status_code != 200:
+                raise ValueError(f"Failed to retrieve embed page: HTTP {resp.status_code}")
+            # Find the first .m3u8 URL anywhere in the page
+            m = re.search(r'https?://[^\s\'"]+\.m3u8[^\s\'"]*', resp.text)
+            if not m:
+                raise ValueError("Could not find m3u8 playlist URL in embed page")
+            url = m.group(0)
+
+        # Now url should be a direct m3u8 playlist
         playlist_resp = requests.get(url)
         if playlist_resp.status_code != 200:
             raise ValueError(f"Failed to retrieve playlist: HTTP {playlist_resp.status_code}")
-        
-        # Find the m3u8 URL
+
+        # Find the m3u8 URL (for master playlists)
         m3u8_url = None
         for line in playlist_resp.text.split("\n"):
             if line.endswith(".m3u8"):
                 m3u8_url = urljoin(url, line)
                 break
-        
+
         if not m3u8_url:
-            raise ValueError("Could not find m3u8 playlist URL")
-        
+            m3u8_url = url  # Already a media playlist
+
         # Get actual playlist of chunks
         ts_resp = requests.get(m3u8_url)
         if ts_resp.status_code != 200:
             raise ValueError(f"Failed to retrieve TS playlist: HTTP {ts_resp.status_code}")
-        
+
         ts_files = [
             urljoin(m3u8_url, line)
             for line in ts_resp.text.split("\n")
