@@ -123,25 +123,45 @@ def download_video(url, name):
         if playlist_resp.status_code != 200:
             raise ValueError(f"Failed to retrieve playlist: HTTP {playlist_resp.status_code}")
 
-        # Find the m3u8 URL (for master playlists)
-        m3u8_url = None
+        # Parse master playlist to find highest quality stream
+        best_quality_url = None
+        best_bandwidth = 0
+        
         for line in playlist_resp.text.split("\n"):
-            if line.endswith(".m3u8"):
-                m3u8_url = urljoin(url, line)
-                break
-
-        if not m3u8_url:
-            m3u8_url = url  # Already a media playlist
-
-        # Get actual playlist of chunks
-        ts_resp = requests.get(m3u8_url)
-        if ts_resp.status_code != 200:
-            raise ValueError(f"Failed to retrieve TS playlist: HTTP {ts_resp.status_code}")
-
+            line = line.strip()
+            if not line or line.startswith('#'):  # Skip empty lines and comments
+                continue
+            
+            # Check if this is a variant stream line
+            if line.endswith('.m3u8'):
+                # Look for bandwidth information in previous lines
+                bandwidth = None
+                for prev_line in reversed(playlist_resp.text.split("\n")):
+                    if prev_line.startswith('#EXT-X-STREAM-INF:'):
+                        # Extract bandwidth from the attributes
+                        attrs = dict(attr.split('=') for attr in prev_line.split(':')[1].split(',') if '=' in attr)
+                        bandwidth = int(attrs.get('BANDWIDTH', 0))
+                        break
+                
+                if bandwidth and bandwidth > best_bandwidth:
+                    best_bandwidth = bandwidth
+                    best_quality_url = urljoin(url, line)
+        
+        if best_quality_url:
+            print(f"Selected highest quality stream with bandwidth: {best_bandwidth} bits/s")
+            # Get actual playlist of chunks from the best quality stream
+            ts_resp = requests.get(best_quality_url)
+            if ts_resp.status_code != 200:
+                raise ValueError(f"Failed to retrieve TS playlist: HTTP {ts_resp.status_code}")
+        else:
+            # If no master playlist found, use the original URL
+            print("No master playlist found, using direct stream")
+            ts_resp = playlist_resp
+            
         ts_files = [
-            urljoin(m3u8_url, line)
+            urljoin(best_quality_url or url, line)
             for line in ts_resp.text.split("\n")
-            if line.endswith(".ts")
+            if line.strip().endswith(".ts")
         ]
         
         if not ts_files:
